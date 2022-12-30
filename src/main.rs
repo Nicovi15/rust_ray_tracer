@@ -1,8 +1,9 @@
 use image::*;
 use std::ops::*;
 
-const WIDTH : u32 = 256;
-const HEIGHT : u32 = 256;
+const ASPECT_RATIO : f64 = 16.0 / 9.0;
+const WIDTH : u32 = 400;
+const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
 const DEBUG : bool = false;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -162,11 +163,33 @@ impl DivAssign<f64> for Vec3{
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Ray {
+    origin: Vec3,
+    direction: Vec3
+}
+
+impl Ray{
+
+    fn new(origin: Vec3,  direction: Vec3) -> Ray{
+        Ray{origin : origin, direction : direction}
+    }
+
+    fn at(&self, t: f64) -> Vec3{
+        self.origin + t * self.direction
+    }
+}
+
+fn ray_color(r : &Ray) -> Vec3{
+    let unit_dir = r.direction.unit_vector();
+    let t = 0.5 * (unit_dir.y + 1.0);
+    (t) * Vec3::new(1.0, 1.0, 1.0) + (1.0 - t)  * Vec3::new(0.5, 0.7, 1.0)
+}
 
 fn main() {
 
-    // Construct a new RGB ImageBuffer with the specified width and height.
-    let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
+    // Vec3 test
+    /*
     let v0 = Vec3::zero();
     let mut  v1 =  2.0 * Vec3::new(5.5, -12.455, 2.0);
     let v2 = Vec3::new(10.1, 8.0, -5.66);
@@ -181,18 +204,33 @@ fn main() {
     println!("{:?}", v1);
     println!("{:?}", v1.squared_length());
     println!("{:?}", v1.length());
+    */
+
+    // Construct a new RGB ImageBuffer with the specified width and height.
+    let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
+
+    // Camera
+    let viewport_height : f64 = 2.0;
+    let viewport_width : f64 = ASPECT_RATIO * viewport_height;
+    let focal_length : f64 = 1.0;
+
+    let origin = Vec3::new(0.0, 0.0, 0.0);
+    let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
+    let vertical = Vec3::new(0.0, viewport_height, 0.0);
+    let lower_left_corner = origin - horizontal/2.0 - vertical/2.0 - Vec3::new(0.0, 0.0, focal_length);
     
     // Iterate over all pixels in the image.
     for (x, y, pixel) in image.enumerate_pixels_mut() {
 
         // Do something with pixel.
-        let r = ((x as f32) / (WIDTH as f32)) as f32;
-        let g = ((y as f32) / (HEIGHT as f32)) as f32;
-        let b = 0.25 as f32;
+        let u = (x as f64) / (WIDTH as f64 - 1.0);
+        let v = (y as f64) / (HEIGHT as f64 - 1.0);
+        let r = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical - origin);
+        let pixel_color = ray_color(&r);
 
-        let r = (255.0_f32  * r) as u8;
-        let g = (255.0_f32  * g) as u8;
-        let b = (255.0_f32  * b) as u8;
+        let r = (255.9  * pixel_color.x) as u8;
+        let g = (255.9  * pixel_color.y) as u8;
+        let b = (255.9  * pixel_color.z) as u8;
 
         *pixel = image::Rgb([r, g, b]);
 
