@@ -181,8 +181,10 @@ impl Ray{
 }
 
 fn ray_color(r: &Ray) -> Vec3{
-    if hit_sphere(&Vec3::new(0.0,0.0,-1.0), 0.5, r){
-        return Vec3::new(1.0, 0.0, 0.0);
+    let t = hit_sphere(&Vec3::new(0.0,0.0,-1.0), 0.5, r);
+    if t > 0.0 {
+        let n  = (r.at(t) - Vec3::new(0.0,0.0,-1.0)).unit_vector();
+        return 0.5 * Vec3::new(n.x + 1.0, n.y + 1.0, n.z + 1.0);
     }
 
     let unit_dir = r.direction.unit_vector();
@@ -190,13 +192,18 @@ fn ray_color(r: &Ray) -> Vec3{
     (1.0 - t) * Vec3::new(1.0, 1.0, 1.0) + t * Vec3::new(0.5, 0.7, 1.0)
 }
 
-fn hit_sphere(center: &Vec3, radius: f64, ray: &Ray ) -> bool{
+fn hit_sphere(center: &Vec3, radius: f64, ray: &Ray ) -> f64{
     let oc = ray.origin - *center;
     let a = ray.direction.dot(&ray.direction);
     let b = 2.0 * oc.dot(&ray.direction);
     let c = oc.dot(&oc) -  radius * radius;
     let discriminant = b * b - 4.0 * a * c;
-    discriminant > 0.0
+    if discriminant < 0.0 {
+        -1.0
+    }
+    else{
+        (-b - discriminant.sqrt() ) / (2.0 * a)
+    }
 }
 
 fn main() {
