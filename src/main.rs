@@ -1,11 +1,26 @@
 use image::*;
 use std::ops::*;
 use std::rc::Rc;
+use rand::prelude::*;
 
 const ASPECT_RATIO : f64 = 16.0 / 9.0;
 const WIDTH : u32 = 400;
 const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
 const DEBUG : bool = false;
+const PI : f64 = std::f64::consts::PI;
+const INFINITY : f64 = f64::INFINITY;
+
+fn deg2rad(degrees : f64) -> f64{
+    degrees * PI / 180.0
+}
+
+fn rand() ->f64{
+    thread_rng().gen()
+}
+
+fn rand_in_range(min : f64, max : f64) -> f64{
+    min + (max-min) * rand()
+}
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Vec3 {
@@ -13,7 +28,6 @@ struct Vec3 {
     y: f64,
     z: f64
 }
-
 
 impl Vec3{
 
@@ -292,6 +306,9 @@ fn main() {
     println!("{:?}", v1.length());
     */
 
+    println!("{}", rand());
+    println!("{}", rand_in_range(60.0, 70.0));
+
     // Construct a new RGB ImageBuffer with the specified width and height.
     let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
 
@@ -299,7 +316,9 @@ fn main() {
     let mut world : Vec<Rc<dyn Hittable>> = Vec::new();
     world.push(Rc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
     world.push(Rc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
+    world.push(Rc::new(Sphere::new(Vec3::new(3.0, 0.3, -3.0), 0.5)));
     
+
     // Camera
     let viewport_height : f64 = 2.0;
     let viewport_width : f64 = ASPECT_RATIO * viewport_height;
