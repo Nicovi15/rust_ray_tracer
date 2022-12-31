@@ -32,8 +32,8 @@ impl Vec3{
         self.squared_length().sqrt()
     }
 
-    fn dot(&self, v : &Vec3) -> Vec3 {
-        Vec3 { x: self.x * v.x, y: self.y * v.y, z: self.z * v.z }
+    fn dot(&self, v : &Vec3) -> f64 {
+        self.x * v.x + self.y * v.y + self.z * v.z 
     }
 
     fn cross(&self, v : &Vec3) -> Vec3 {
@@ -180,10 +180,23 @@ impl Ray{
     }
 }
 
-fn ray_color(r : &Ray) -> Vec3{
+fn ray_color(r: &Ray) -> Vec3{
+    if hit_sphere(&Vec3::new(0.0,0.0,-1.0), 0.5, r){
+        return Vec3::new(1.0, 0.0, 0.0);
+    }
+
     let unit_dir = r.direction.unit_vector();
     let t = 0.5 * (unit_dir.y + 1.0);
-    (t) * Vec3::new(1.0, 1.0, 1.0) + (1.0 - t)  * Vec3::new(0.5, 0.7, 1.0)
+    (1.0 - t) * Vec3::new(1.0, 1.0, 1.0) + t * Vec3::new(0.5, 0.7, 1.0)
+}
+
+fn hit_sphere(center: &Vec3, radius: f64, ray: &Ray ) -> bool{
+    let oc = ray.origin - *center;
+    let a = ray.direction.dot(&ray.direction);
+    let b = 2.0 * oc.dot(&ray.direction);
+    let c = oc.dot(&oc) -  radius * radius;
+    let discriminant = b * b - 4.0 * a * c;
+    discriminant > 0.0
 }
 
 fn main() {
@@ -221,7 +234,8 @@ fn main() {
     
     // Iterate over all pixels in the image.
     for (x, y, pixel) in image.enumerate_pixels_mut() {
-
+        let y = (HEIGHT - 1) - y; 
+        
         // Do something with pixel.
         let u = (x as f64) / (WIDTH as f64 - 1.0);
         let v = (y as f64) / (HEIGHT as f64 - 1.0);
