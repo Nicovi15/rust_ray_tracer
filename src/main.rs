@@ -1,5 +1,6 @@
 use image::*;
 use std::ops::*;
+use std::rc::Rc;
 
 const ASPECT_RATIO : f64 = 16.0 / 9.0;
 const WIDTH : u32 = 400;
@@ -180,30 +181,95 @@ impl Ray{
     }
 }
 
-fn ray_color(r: &Ray) -> Vec3{
-    let t = hit_sphere(&Vec3::new(0.0,0.0,-1.0), 0.5, r);
-    if t > 0.0 {
-        let n  = (r.at(t) - Vec3::new(0.0,0.0,-1.0)).unit_vector();
-        return 0.5 * Vec3::new(n.x + 1.0, n.y + 1.0, n.z + 1.0);
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct HitRecord {
+    point: Vec3,
+    normal: Vec3,
+    t: f64,
+    front_face : bool
+}
+
+impl HitRecord{
+    fn new(point : Vec3, normal : Vec3, t : f64, front_face : bool) -> HitRecord{
+        HitRecord { point: point, normal: normal, t: t , front_face : front_face}
+    }
+}
+
+trait Hittable{
+    fn hit(&self, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>;
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Sphere {
+    center: Vec3,
+    radius: f64
+}
+
+impl Sphere{
+    fn new(center : Vec3, radius : f64) -> Sphere{
+        Sphere { center: center, radius: radius }
+    }
+}
+
+impl Hittable for Sphere{
+    fn hit(&self, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>{
+        let oc = ray.origin - self.center;
+        let a = ray.direction.squared_length();
+        let half_b = oc.dot(&ray.direction);
+        let c = oc.squared_length() -  self.radius * self.radius;
+        let discriminant = half_b * half_b - a * c;
+        if discriminant < 0.0 {
+           return None;
+        }
+        let sqrtd = discriminant.sqrt();
+        let mut root = (-half_b - sqrtd ) / a;
+        if root < t_min || t_max < root {
+            root = (-half_b + sqrtd) / a;
+            if root < t_min || t_max < root {
+                return None;
+            }
+        }
+        let point = ray.at(root); 
+        let outward_normal = (point - self.center) / self.radius;
+        let front_face = ray.direction.dot(&outward_normal) < 0.0;
+        let normal =  if front_face {outward_normal}  else {-outward_normal};
+        let res = HitRecord::new(point, normal, root, front_face);
+
+        Some(res)
+    }
+}
+
+fn hit(list : &Vec<Rc<dyn Hittable>>, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>{
+    let  mut hit_record : Option<HitRecord> = None;
+    let mut closest_so_far = t_max;
+
+    for o in list{
+        let result = o.hit(ray, t_min, closest_so_far);
+        match result{
+            Some(h) => {
+                hit_record = Some(h);
+                closest_so_far = h.t;
+            }
+            None => {}
+        }
+    }
+    hit_record
+}
+
+
+fn ray_color(r: &Ray, list : &Vec<Rc<dyn Hittable>>) -> Vec3{
+    let hit = hit(list, r, 0.0, 100000.0);
+
+    match hit{
+        Some(h) => {
+            return 0.5 * (h.normal + Vec3::new(1.0, 1.0, 1.0));
+        }
+        None => {}
     }
 
     let unit_dir = r.direction.unit_vector();
     let t = 0.5 * (unit_dir.y + 1.0);
     (1.0 - t) * Vec3::new(1.0, 1.0, 1.0) + t * Vec3::new(0.5, 0.7, 1.0)
-}
-
-fn hit_sphere(center: &Vec3, radius: f64, ray: &Ray ) -> f64{
-    let oc = ray.origin - *center;
-    let a = ray.direction.dot(&ray.direction);
-    let b = 2.0 * oc.dot(&ray.direction);
-    let c = oc.dot(&oc) -  radius * radius;
-    let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 {
-        -1.0
-    }
-    else{
-        (-b - discriminant.sqrt() ) / (2.0 * a)
-    }
 }
 
 fn main() {
@@ -229,6 +295,11 @@ fn main() {
     // Construct a new RGB ImageBuffer with the specified width and height.
     let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
 
+    // Wolrd
+    let mut world : Vec<Rc<dyn Hittable>> = Vec::new();
+    world.push(Rc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
+    world.push(Rc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
+    
     // Camera
     let viewport_height : f64 = 2.0;
     let viewport_width : f64 = ASPECT_RATIO * viewport_height;
@@ -247,7 +318,7 @@ fn main() {
         let u = (x as f64) / (WIDTH as f64 - 1.0);
         let v = (y as f64) / (HEIGHT as f64 - 1.0);
         let r = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical - origin);
-        let pixel_color = ray_color(&r);
+        let pixel_color = ray_color(&r, &world);
 
         let r = (255.9  * pixel_color.x) as u8;
         let g = (255.9  * pixel_color.y) as u8;
