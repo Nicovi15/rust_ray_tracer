@@ -7,11 +7,18 @@ const ASPECT_RATIO : f64 = 16.0 / 9.0;
 const WIDTH : u32 = 400;
 const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
 const DEBUG : bool = false;
+const SAMPLES_PER_PIXEL : u32 = 100;
 const PI : f64 = std::f64::consts::PI;
 const INFINITY : f64 = f64::INFINITY;
 
 fn deg2rad(degrees : f64) -> f64{
     degrees * PI / 180.0
+}
+
+fn clamp(x : f64, min: f64, max: f64) -> f64{
+    if x > max { max }
+    else if x < min { min }
+    else { x }
 }
 
 fn rand() ->f64{
@@ -20,6 +27,15 @@ fn rand() ->f64{
 
 fn rand_in_range(min : f64, max : f64) -> f64{
     min + (max-min) * rand()
+}
+
+fn color_rgb(pixel_color : &Vec3, samples_per_pixel : u32) -> [u8; 3]{
+
+    let scale = 1.0 / samples_per_pixel as f64;
+    let r = (256.0 * clamp(pixel_color.x * scale, 0.0, 0.999)) as u8;
+    let g = (256.0 * clamp(pixel_color.y * scale, 0.0, 0.999)) as u8;
+    let b = (256.0 * clamp(pixel_color.z * scale, 0.0, 0.999)) as u8;
+    [r, g, b]
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -213,6 +229,47 @@ trait Hittable{
     fn hit(&self, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>;
 }
 
+struct Camera{
+    aspect_ratio : f64,
+    viewport_height : f64,
+    viewport_width : f64,
+    focal_length : f64,
+    origin : Vec3,
+    lower_left_corner : Vec3,
+    horizontal : Vec3,
+    vertical : Vec3
+}
+
+impl Camera {
+    fn default() -> Camera{
+        Camera { aspect_ratio: ASPECT_RATIO, 
+            viewport_height: 2.0, 
+            viewport_width: ASPECT_RATIO * 2.0, 
+            focal_length: 1.0, 
+            origin: Vec3::zero(), 
+            lower_left_corner: Vec3::zero() - Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0)/2.0 - Vec3::new(0.0, 2.0, 0.0)/2.0 - Vec3::new(0.0, 0.0, 1.0), 
+            horizontal: Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0), 
+            vertical: Vec3::new(0.0, 2.0, 0.0) }
+    }
+
+    fn new(aspect_ratio : f64, viewport_height : f64, focal_length : f64, origin : Vec3) -> Camera{
+        let viewport_width = aspect_ratio * viewport_height;
+        let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
+        let vertical = Vec3::new(0.0, viewport_height, 0.0);
+        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
+
+        Camera { aspect_ratio: aspect_ratio, viewport_height: viewport_height, 
+            viewport_width: viewport_width, focal_length: focal_length, 
+            origin: origin, lower_left_corner: lower_left_corner, 
+            horizontal: horizontal, vertical: vertical }
+    }
+
+    fn get_ray(&self, u: f64, v: f64) -> Ray{
+        Ray::new(self.origin, self.lower_left_corner + u * self.horizontal + v * self.vertical - self.origin)
+    }
+}
+
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Sphere {
     center: Vec3,
@@ -287,28 +344,6 @@ fn ray_color(r: &Ray, list : &Vec<Rc<dyn Hittable>>) -> Vec3{
 }
 
 fn main() {
-
-    // Vec3 test
-    /*
-    let v0 = Vec3::zero();
-    let mut  v1 =  2.0 * Vec3::new(5.5, -12.455, 2.0);
-    let v2 = Vec3::new(10.1, 8.0, -5.66);
-    v1 *= 2.0;
-    v1 /= 4.0;
-    println!("{:?}", v0);
-    println!("{:?}", v1);
-    println!("{:?}", v2);
-    println!("{:?}", v1 - v2);
-    println!("{:?}", v1.unit_vector());
-    v1.normalize();
-    println!("{:?}", v1);
-    println!("{:?}", v1.squared_length());
-    println!("{:?}", v1.length());
-    */
-
-    println!("{}", rand());
-    println!("{}", rand_in_range(60.0, 70.0));
-
     // Construct a new RGB ImageBuffer with the specified width and height.
     let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
 
@@ -320,34 +355,26 @@ fn main() {
     
 
     // Camera
-    let viewport_height : f64 = 2.0;
-    let viewport_width : f64 = ASPECT_RATIO * viewport_height;
-    let focal_length : f64 = 1.0;
-
-    let origin = Vec3::new(0.0, 0.0, 0.0);
-    let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
-    let vertical = Vec3::new(0.0, viewport_height, 0.0);
-    let lower_left_corner = origin - horizontal/2.0 - vertical/2.0 - Vec3::new(0.0, 0.0, focal_length);
+    let camera = Camera::default();
     
     // Iterate over all pixels in the image.
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         let y = (HEIGHT - 1) - y; 
         
         // Do something with pixel.
-        let u = (x as f64) / (WIDTH as f64 - 1.0);
-        let v = (y as f64) / (HEIGHT as f64 - 1.0);
-        let r = Ray::new(origin, lower_left_corner + u*horizontal + v*vertical - origin);
-        let pixel_color = ray_color(&r, &world);
+        let mut pixel_color = Vec3::zero();
+        for _i in 0..SAMPLES_PER_PIXEL {
+            let u = (x as f64 + rand()) / (WIDTH as f64 - 1.0);
+            let v = (y as f64 + rand()) / (HEIGHT as f64 - 1.0);
+            pixel_color += ray_color(&camera.get_ray(u, v), &world);
+        }
 
-        let r = (255.9  * pixel_color.x) as u8;
-        let g = (255.9  * pixel_color.y) as u8;
-        let b = (255.9  * pixel_color.z) as u8;
-
-        *pixel = image::Rgb([r, g, b]);
+        *pixel = image::Rgb(color_rgb(&pixel_color, SAMPLES_PER_PIXEL));
 
         if DEBUG { println!("{},{}", x, y) };
     }
     
+
     // write it out to a file
     image.save("output.png").unwrap();
 }
