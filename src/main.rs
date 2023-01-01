@@ -1,7 +1,8 @@
 use image::*;
 use std::ops::*;
-use std::rc::Rc;
 use rand::prelude::*;
+use rayon::prelude::*;
+use std::sync::Arc;
 
 const ASPECT_RATIO : f64 = 16.0 / 9.0;
 const WIDTH : u32 = 400;
@@ -269,7 +270,6 @@ impl Camera {
     }
 }
 
-
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Sphere {
     center: Vec3,
@@ -310,7 +310,7 @@ impl Hittable for Sphere{
     }
 }
 
-fn hit(list : &Vec<Rc<dyn Hittable>>, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>{
+fn hit(list : &Vec<Arc<dyn Hittable + Sync + Send>>, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>{
     let  mut hit_record : Option<HitRecord> = None;
     let mut closest_so_far = t_max;
 
@@ -327,8 +327,7 @@ fn hit(list : &Vec<Rc<dyn Hittable>>, ray : &Ray, t_min : f64, t_max : f64) -> O
     hit_record
 }
 
-
-fn ray_color(r: &Ray, list : &Vec<Rc<dyn Hittable>>) -> Vec3{
+fn ray_color(r: &Ray, list : &Vec<Arc<dyn Hittable + Sync + Send>>) -> Vec3{
     let hit = hit(list, r, 0.0, 100000.0);
 
     match hit{
@@ -348,17 +347,16 @@ fn main() {
     let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
 
     // Wolrd
-    let mut world : Vec<Rc<dyn Hittable>> = Vec::new();
-    world.push(Rc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
-    world.push(Rc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
-    world.push(Rc::new(Sphere::new(Vec3::new(3.0, 0.3, -3.0), 0.5)));
+    let mut world : Vec<Arc<dyn Hittable + Sync + Send>> = Vec::new();
+    world.push(Arc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
+    world.push(Arc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
+    world.push(Arc::new(Sphere::new(Vec3::new(3.0, 0.3, -3.0), 0.5)));
     
-
     // Camera
     let camera = Camera::default();
     
     // Iterate over all pixels in the image.
-    for (x, y, pixel) in image.enumerate_pixels_mut() {
+    image.enumerate_pixels_mut().par_bridge().for_each(|(x, y, pixel)|{
         let y = (HEIGHT - 1) - y; 
         
         // Do something with pixel.
@@ -366,15 +364,15 @@ fn main() {
         for _i in 0..SAMPLES_PER_PIXEL {
             let u = (x as f64 + rand()) / (WIDTH as f64 - 1.0);
             let v = (y as f64 + rand()) / (HEIGHT as f64 - 1.0);
+
             pixel_color += ray_color(&camera.get_ray(u, v), &world);
         }
 
         *pixel = image::Rgb(color_rgb(&pixel_color, SAMPLES_PER_PIXEL));
 
         if DEBUG { println!("{},{}", x, y) };
-    }
+    });
     
-
     // write it out to a file
     image.save("output.png").unwrap();
 }
