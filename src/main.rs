@@ -4,11 +4,12 @@ use rand::prelude::*;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-const ASPECT_RATIO : f64 = 16.0 / 9.0;
-const WIDTH : u32 = 400;
+const ASPECT_RATIO : f64 = 1.0;//16.0 / 9.0;
+const WIDTH : u32 = 300;
 const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
 const DEBUG : bool = false;
-const SAMPLES_PER_PIXEL : u32 = 100;
+const SAMPLES_PER_PIXEL : u32 = 500;
+const MAX_DEPTH : i32 = 50;
 const PI : f64 = std::f64::consts::PI;
 const INFINITY : f64 = f64::INFINITY;
 
@@ -33,9 +34,9 @@ fn rand_in_range(min : f64, max : f64) -> f64{
 fn color_rgb(pixel_color : &Vec3, samples_per_pixel : u32) -> [u8; 3]{
 
     let scale = 1.0 / samples_per_pixel as f64;
-    let r = (256.0 * clamp(pixel_color.x * scale, 0.0, 0.999)) as u8;
-    let g = (256.0 * clamp(pixel_color.y * scale, 0.0, 0.999)) as u8;
-    let b = (256.0 * clamp(pixel_color.z * scale, 0.0, 0.999)) as u8;
+    let r = (256.0 * clamp((pixel_color.x * scale).sqrt(), 0.0, 0.999)) as u8;
+    let g = (256.0 * clamp((pixel_color.y * scale).sqrt(), 0.0, 0.999)) as u8;
+    let b = (256.0 * clamp((pixel_color.z * scale).sqrt(), 0.0, 0.999)) as u8;
     [r, g, b]
 }
 
@@ -88,6 +89,36 @@ impl Vec3{
         Vec3::new(self.x / l, self.y / l, self.z / l)
     }
 
+    fn rand() -> Vec3{
+        Vec3::new(rand(), rand(), rand())
+    }
+
+    fn rand_in_range(min : f64, max : f64) -> Vec3{
+        Vec3 { x: rand_in_range(min, max), y: rand_in_range(min, max), z: rand_in_range(min, max) }
+    }
+
+    fn random_in_unit_sphere() -> Vec3{
+        loop{
+            let res = Vec3::rand_in_range(-1.0, 1.0);
+            if res.squared_length() >= 1.0 { continue;}
+            return res;
+        }
+    }
+
+    fn random_unit_vector() -> Vec3{
+        Vec3::random_in_unit_sphere().unit_vector()
+    }
+
+    fn random_in_hemisphere(normal : &Vec3) -> Vec3{
+        let in_unit_sphere = Vec3::random_in_unit_sphere();
+        if in_unit_sphere.dot(normal) > 0.0 { in_unit_sphere }
+        else { -in_unit_sphere }
+    }
+
+    fn near_zero(&self) -> bool{
+        let eps = 1e-8;
+        self.x.abs() < eps && self.y.abs() < eps && self.z.abs() < eps
+    }
 }
 
 impl Add for Vec3 {
@@ -212,22 +243,51 @@ impl Ray{
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Clone)]
 struct HitRecord {
     point: Vec3,
     normal: Vec3,
     t: f64,
-    front_face : bool
+    front_face : bool,
+    mat : Arc<dyn Material + Sync + Send>
 }
 
 impl HitRecord{
-    fn new(point : Vec3, normal : Vec3, t : f64, front_face : bool) -> HitRecord{
-        HitRecord { point: point, normal: normal, t: t , front_face : front_face}
+    fn new(point : Vec3, normal : Vec3, t : f64, front_face : bool, mat : Arc<dyn Material + Sync + Send>) -> HitRecord{
+        HitRecord { point: point, normal: normal, t: t , front_face : front_face, mat : mat}
     }
 }
 
 trait Hittable{
     fn hit(&self, ray : &Ray, t_min : f64, t_max : f64) -> Option<HitRecord>;
+}
+
+trait Material{
+    fn scatter(&self, r_in : &Ray, rec : &HitRecord, attenuation : &mut Vec3, scattered : &mut Ray) -> bool;
+}
+
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Lambertian{
+    albedo : Vec3
+}
+
+impl Lambertian {
+    fn new(color : Vec3) -> Lambertian{
+        Lambertian { albedo: color }
+    }
+}
+
+impl Material for Lambertian{
+    fn scatter(&self, r_in : &Ray, rec : &HitRecord, attenuation : &mut Vec3, scattered : &mut Ray) -> bool{
+        let mut scatter_direction = rec.normal + Vec3::random_unit_vector();
+
+        if scatter_direction.near_zero() { scatter_direction = rec.normal; }
+
+        *scattered = Ray::new(rec.point, scatter_direction);
+        *attenuation = self.albedo;
+        true
+    }
 }
 
 struct Camera{
@@ -270,15 +330,16 @@ impl Camera {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Clone)]
 struct Sphere {
     center: Vec3,
-    radius: f64
+    radius: f64,
+    mat : Arc<dyn Material + Sync + Send>
 }
 
 impl Sphere{
-    fn new(center : Vec3, radius : f64) -> Sphere{
-        Sphere { center: center, radius: radius }
+    fn new(center : Vec3, radius : f64, mat : Arc<dyn Material + Sync + Send>) -> Sphere{
+        Sphere { center: center, radius: radius, mat: mat }
     }
 }
 
@@ -304,7 +365,7 @@ impl Hittable for Sphere{
         let outward_normal = (point - self.center) / self.radius;
         let front_face = ray.direction.dot(&outward_normal) < 0.0;
         let normal =  if front_face {outward_normal}  else {-outward_normal};
-        let res = HitRecord::new(point, normal, root, front_face);
+        let res = HitRecord::new(point, normal, root, front_face, self.mat.clone());
 
         Some(res)
     }
@@ -318,7 +379,7 @@ fn hit(list : &Vec<Arc<dyn Hittable + Sync + Send>>, ray : &Ray, t_min : f64, t_
         let result = o.hit(ray, t_min, closest_so_far);
         match result{
             Some(h) => {
-                hit_record = Some(h);
+                hit_record = Some(h.clone());
                 closest_so_far = h.t;
             }
             None => {}
@@ -327,12 +388,19 @@ fn hit(list : &Vec<Arc<dyn Hittable + Sync + Send>>, ray : &Ray, t_min : f64, t_
     hit_record
 }
 
-fn ray_color(r: &Ray, list : &Vec<Arc<dyn Hittable + Sync + Send>>) -> Vec3{
-    let hit = hit(list, r, 0.0, 100000.0);
+fn ray_color(r: &Ray, list : &Vec<Arc<dyn Hittable + Sync + Send>>, depth : i32) -> Vec3{
+
+    if depth <= 0 {return Vec3::zero();}
+
+    let hit = hit(list, r, 0.001, 100000.0);
 
     match hit{
         Some(h) => {
-            return 0.5 * (h.normal + Vec3::new(1.0, 1.0, 1.0));
+            let mut scattered = Ray::new(Vec3::zero(), Vec3::zero());
+            let mut attenuation = Vec3::zero();
+            if h.mat.scatter(r, &h, &mut attenuation, &mut scattered)
+                { return attenuation * ray_color(&scattered, list, depth-1);}
+            else { return Vec3::zero(); };
         }
         None => {}
     }
@@ -346,11 +414,16 @@ fn main() {
     // Construct a new RGB ImageBuffer with the specified width and height.
     let mut image: RgbImage = ImageBuffer::new(WIDTH, HEIGHT);
 
-    // Wolrd
+    // Materials
+    let mat0 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.8, 0.8, 0.0)));
+    let mat1 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.8, 0.0, 0.8)));
+    let mat2 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.0, 0.8, 0.8)));
+
+    // World
     let mut world : Vec<Arc<dyn Hittable + Sync + Send>> = Vec::new();
-    world.push(Arc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0)));
-    world.push(Arc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5)));
-    world.push(Arc::new(Sphere::new(Vec3::new(3.0, 0.3, -3.0), 0.5)));
+    world.push(Arc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, mat0.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, mat2.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(2.15, 0.5, -3.0), 0.5, mat1.clone())));
     
     // Camera
     let camera = Camera::default();
@@ -365,7 +438,7 @@ fn main() {
             let u = (x as f64 + rand()) / (WIDTH as f64 - 1.0);
             let v = (y as f64 + rand()) / (HEIGHT as f64 - 1.0);
 
-            pixel_color += ray_color(&camera.get_ray(u, v), &world);
+            pixel_color += ray_color(&camera.get_ray(u, v), &world, MAX_DEPTH);
         }
 
         *pixel = image::Rgb(color_rgb(&pixel_color, SAMPLES_PER_PIXEL));
