@@ -278,8 +278,24 @@ impl Lambertian {
     }
 }
 
+struct Metal{
+    albedo : Vec3,
+    fuzz : f64
+}
+
+impl Metal{
+    fn new(color : Vec3, fuzz : f64) -> Metal{
+        Metal { albedo: color, fuzz: if fuzz < 1.0 {fuzz} else {1.0} }
+    }
+}
+
+fn reflect(v : &Vec3, n : &Vec3) -> Vec3{
+    *v - 2.0 * v.dot(n) * *n
+}
+
 impl Material for Lambertian{
     fn scatter(&self, r_in : &Ray, rec : &HitRecord, attenuation : &mut Vec3, scattered : &mut Ray) -> bool{
+        //let mut scatter_direction = rec.normal + Vec3::random_in_unit_sphere();
         let mut scatter_direction = rec.normal + Vec3::random_unit_vector();
 
         if scatter_direction.near_zero() { scatter_direction = rec.normal; }
@@ -287,6 +303,17 @@ impl Material for Lambertian{
         *scattered = Ray::new(rec.point, scatter_direction);
         *attenuation = self.albedo;
         true
+    }
+}
+
+impl Material for Metal{
+    fn scatter(&self, r_in : &Ray, rec : &HitRecord, attenuation : &mut Vec3, scattered : &mut Ray) -> bool{
+        
+        let reflected = reflect(&r_in.direction.unit_vector(), &rec.normal);
+        //*scattered = Ray::new(rec.point, reflected);
+        *scattered = Ray::new(rec.point, reflected + self.fuzz * Vec3::random_in_unit_sphere());
+        *attenuation = self.albedo;
+        scattered.direction.dot(&rec.normal) > 0.0
     }
 }
 
@@ -418,12 +445,14 @@ fn main() {
     let mat0 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.8, 0.8, 0.0)));
     let mat1 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.8, 0.0, 0.8)));
     let mat2 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.0, 0.8, 0.8)));
+    let mat3 : Arc<dyn Material + Sync + Send> = Arc::new(Metal::new(Vec3::new(0.8, 0.8, 0.8), 0.2));
 
     // World
     let mut world : Vec<Arc<dyn Hittable + Sync + Send>> = Vec::new();
     world.push(Arc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, mat0.clone())));
-    world.push(Arc::new(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, mat2.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(-0.7, 0.0, -0.75), 0.5, mat2.clone())));
     world.push(Arc::new(Sphere::new(Vec3::new(2.15, 0.5, -3.0), 0.5, mat1.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(0.3, 0.0, -1.75), 0.5, mat3.clone())));
     
     // Camera
     let camera = Camera::default();
