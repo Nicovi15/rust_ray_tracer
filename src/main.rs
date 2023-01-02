@@ -362,10 +362,6 @@ impl Material for Metal{
 }
 
 struct Camera{
-    aspect_ratio : f64,
-    viewport_height : f64,
-    viewport_width : f64,
-    focal_length : f64,
     origin : Vec3,
     lower_left_corner : Vec3,
     horizontal : Vec3,
@@ -373,31 +369,48 @@ struct Camera{
 }
 
 impl Camera {
-    fn default() -> Camera{
-        Camera { aspect_ratio: ASPECT_RATIO, 
-            viewport_height: 2.0, 
-            viewport_width: ASPECT_RATIO * 2.0, 
-            focal_length: 1.0, 
-            origin: Vec3::zero(), 
-            lower_left_corner: Vec3::zero() - Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0)/2.0 - Vec3::new(0.0, 2.0, 0.0)/2.0 - Vec3::new(0.0, 0.0, 1.0), 
-            horizontal: Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0), 
-            vertical: Vec3::new(0.0, 2.0, 0.0) }
-    }
+    //fn default() -> Camera{
+    //    Camera { aspect_ratio: ASPECT_RATIO, 
+    //        viewport_height: 2.0, 
+    //        viewport_width: ASPECT_RATIO * 2.0, 
+    //        focal_length: 1.0, 
+    //        origin: Vec3::zero(), 
+    //        lower_left_corner: Vec3::zero() - Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0)/2.0 - Vec3::new(0.0, 2.0, 0.0)/2.0 - Vec3::new(0.0, 0.0, 1.0), 
+    //        horizontal: Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0), 
+    //        vertical: Vec3::new(0.0, 2.0, 0.0) }
+    //}
+//
+    //fn new(aspect_ratio : f64, viewport_height : f64, focal_length : f64, origin : Vec3) -> Camera{
+    //    let viewport_width = aspect_ratio * viewport_height;
+    //    let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
+    //    let vertical = Vec3::new(0.0, viewport_height, 0.0);
+    //    let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
+//
+    //    Camera { aspect_ratio: aspect_ratio, viewport_height: viewport_height, 
+    //        viewport_width: viewport_width, focal_length: focal_length, 
+    //        origin: origin, lower_left_corner: lower_left_corner, 
+    //        horizontal: horizontal, vertical: vertical }
+    //}
 
-    fn new(aspect_ratio : f64, viewport_height : f64, focal_length : f64, origin : Vec3) -> Camera{
+    fn new(lookfrom : Vec3, lookat : Vec3, vup : Vec3, vfov : f64, aspect_ratio : f64 ) -> Camera{
+        let theta = deg2rad(vfov);
+        let h = f64::tan(theta/2.0);
+        let viewport_height = 2.0 * h;
         let viewport_width = aspect_ratio * viewport_height;
-        let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
-        let vertical = Vec3::new(0.0, viewport_height, 0.0);
-        let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
 
-        Camera { aspect_ratio: aspect_ratio, viewport_height: viewport_height, 
-            viewport_width: viewport_width, focal_length: focal_length, 
-            origin: origin, lower_left_corner: lower_left_corner, 
-            horizontal: horizontal, vertical: vertical }
+        let w = (lookfrom - lookat).unit_vector();
+        let u = (vup.cross(&w)).unit_vector();
+        let v = w.cross(&u);
+
+        let horizontal = viewport_width * u;
+        let vertical = viewport_height * v;
+        let lower_left_corner = lookfrom - horizontal / 2.0 - vertical / 2.0 - w;
+
+        Camera { origin: lookfrom, lower_left_corner: lower_left_corner, horizontal: horizontal, vertical: vertical }
     }
 
-    fn get_ray(&self, u: f64, v: f64) -> Ray{
-        Ray::new(self.origin, self.lower_left_corner + u * self.horizontal + v * self.vertical - self.origin)
+    fn get_ray(&self, s: f64, t: f64) -> Ray{
+        Ray::new(self.origin, self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin)
     }
 }
 
@@ -463,7 +476,7 @@ fn ray_color(r: &Ray, list : &Vec<Arc<dyn Hittable + Sync + Send>>, depth : i32)
 
     if depth <= 0 {return Vec3::zero();}
 
-    let hit = hit(list, r, 0.001, 100000.0);
+    let hit = hit(list, r, 0.001, INFINITY);
 
     match hit{
         Some(h) => {
@@ -503,7 +516,11 @@ fn main() {
     world.push(Arc::new(Sphere::new(Vec3::new(0.3, 0.0, -1.75), 0.5, mat3.clone())));
     
     // Camera
-    let camera = Camera::default();
+    let camera = Camera::new( Vec3::new(0.0, 0.8, 0.5), 
+                                        Vec3::new(0.0, 0.4, -1.0), 
+                                            Vec3::new(0.0, 1.0, 0.0), 
+                                            90.0, 
+                                            ASPECT_RATIO);
     
     // Iterate over all pixels in the image.
     image.enumerate_pixels_mut().par_bridge().for_each(|(x, y, pixel)|{
