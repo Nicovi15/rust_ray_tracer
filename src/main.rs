@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 
 const ASPECT_RATIO : f64 = 1.0;//16.0 / 9.0;
-const WIDTH : u32 = 300;
+const WIDTH : u32 = 900;
 const HEIGHT : u32 = (WIDTH as f64 / ASPECT_RATIO) as u32;
 const DEBUG : bool = false;
 const SAMPLES_PER_PIXEL : u32 = 500;
@@ -283,6 +283,22 @@ struct Metal{
     fuzz : f64
 }
 
+struct Dielectric{
+    ir : f64
+}
+
+impl Dielectric{
+    fn new(ir : f64) -> Dielectric{
+        Dielectric { ir: ir }
+    }
+
+    fn reflectance(cosine : f64, ref_idx: f64) -> f64{
+        let r0 = (1.0-ref_idx) / (1.0 + ref_idx);
+        let r0 = r0 * r0;
+        r0 + (1.0 - r0) * (1.0 -cosine).powf(5.0)
+    }
+}
+
 impl Metal{
     fn new(color : Vec3, fuzz : f64) -> Metal{
         Metal { albedo: color, fuzz: if fuzz < 1.0 {fuzz} else {1.0} }
@@ -291,6 +307,34 @@ impl Metal{
 
 fn reflect(v : &Vec3, n : &Vec3) -> Vec3{
     *v - 2.0 * v.dot(n) * *n
+}
+
+fn refract(uv: &Vec3, n: &Vec3, etai_over_etat: f64) -> Vec3{
+    let cos_theta = f64::min(-uv.dot(n), 1.0);
+    let r_out_perp = etai_over_etat * (*uv + cos_theta * *n);
+    let r_out_parallel = -(1.0 - r_out_perp.squared_length()).abs().sqrt() * *n;
+    r_out_perp + r_out_parallel
+}
+
+impl Material for Dielectric{
+    fn scatter(&self, r_in : &Ray, rec : &HitRecord, attenuation : &mut Vec3, scattered : &mut Ray) -> bool{
+        
+        *attenuation = Vec3::new(1.0, 1.0, 1.0);
+        let refraction_ratio = if rec.front_face { 1.0 / self.ir} else {self.ir};
+        let unit_direction = r_in.direction.unit_vector();
+
+        let cos_theta = f64::min(-unit_direction.dot(&rec.normal), 1.0);
+        let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
+
+        let cannot_refract = refraction_ratio * sin_theta > 1.0;
+        let direction = if cannot_refract || Dielectric::reflectance(cos_theta, refraction_ratio) > rand(){ 
+            reflect(&unit_direction, &rec.normal)} 
+            else {refract(&unit_direction, &rec.normal, refraction_ratio)};
+
+        //let refracted = refract(&unit_direction, &rec.normal, refraction_ratio);
+        *scattered = Ray::new(rec.point, direction);
+        true
+    }
 }
 
 impl Material for Lambertian{
@@ -446,11 +490,15 @@ fn main() {
     let mat1 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.8, 0.0, 0.8)));
     let mat2 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.0, 0.8, 0.8)));
     let mat3 : Arc<dyn Material + Sync + Send> = Arc::new(Metal::new(Vec3::new(0.8, 0.8, 0.8), 0.2));
+    let mat4 : Arc<dyn Material + Sync + Send> = Arc::new(Dielectric::new(1.5));
+    let mat5 : Arc<dyn Material + Sync + Send> = Arc::new(Lambertian::new(Vec3::new(0.8, 0.0, 0.0)));
 
     // World
     let mut world : Vec<Arc<dyn Hittable + Sync + Send>> = Vec::new();
     world.push(Arc::new(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, mat0.clone())));
-    world.push(Arc::new(Sphere::new(Vec3::new(-0.7, 0.0, -0.75), 0.5, mat2.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(-0.7, 0.0, -2.75), 0.5, mat4.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(-2.0, 1.5, -4.25), 0.5, mat5.clone())));
+    world.push(Arc::new(Sphere::new(Vec3::new(-1.0, 0.0, -1.0), 0.5, mat2.clone())));
     world.push(Arc::new(Sphere::new(Vec3::new(2.15, 0.5, -3.0), 0.5, mat1.clone())));
     world.push(Arc::new(Sphere::new(Vec3::new(0.3, 0.0, -1.75), 0.5, mat3.clone())));
     
