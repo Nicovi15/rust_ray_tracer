@@ -119,6 +119,14 @@ impl Vec3{
         let eps = 1e-8;
         self.x.abs() < eps && self.y.abs() < eps && self.z.abs() < eps
     }
+
+    fn random_in_unit_disk() -> Vec3{
+        loop{
+            let p = Vec3::new(rand_in_range(-1.0, 1.0), rand_in_range(-1.0, 1.0), 0.0);
+            if p.squared_length() >= 1.0 { continue; }
+            return p;
+        }
+    }
 }
 
 impl Add for Vec3 {
@@ -266,8 +274,6 @@ trait Material{
     fn scatter(&self, r_in : &Ray, rec : &HitRecord, attenuation : &mut Vec3, scattered : &mut Ray) -> bool;
 }
 
-
-#[derive(Debug, Copy, Clone, PartialEq)]
 struct Lambertian{
     albedo : Vec3
 }
@@ -365,32 +371,15 @@ struct Camera{
     origin : Vec3,
     lower_left_corner : Vec3,
     horizontal : Vec3,
-    vertical : Vec3
+    vertical : Vec3,
+    u : Vec3,
+    v : Vec3,
+    w : Vec3,
+    depth_of_field : bool,
+    lens_radius : f64
 }
 
 impl Camera {
-    //fn default() -> Camera{
-    //    Camera { aspect_ratio: ASPECT_RATIO, 
-    //        viewport_height: 2.0, 
-    //        viewport_width: ASPECT_RATIO * 2.0, 
-    //        focal_length: 1.0, 
-    //        origin: Vec3::zero(), 
-    //        lower_left_corner: Vec3::zero() - Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0)/2.0 - Vec3::new(0.0, 2.0, 0.0)/2.0 - Vec3::new(0.0, 0.0, 1.0), 
-    //        horizontal: Vec3::new(ASPECT_RATIO * 2.0, 0.0, 0.0), 
-    //        vertical: Vec3::new(0.0, 2.0, 0.0) }
-    //}
-//
-    //fn new(aspect_ratio : f64, viewport_height : f64, focal_length : f64, origin : Vec3) -> Camera{
-    //    let viewport_width = aspect_ratio * viewport_height;
-    //    let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
-    //    let vertical = Vec3::new(0.0, viewport_height, 0.0);
-    //    let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
-//
-    //    Camera { aspect_ratio: aspect_ratio, viewport_height: viewport_height, 
-    //        viewport_width: viewport_width, focal_length: focal_length, 
-    //        origin: origin, lower_left_corner: lower_left_corner, 
-    //        horizontal: horizontal, vertical: vertical }
-    //}
 
     fn new(lookfrom : Vec3, lookat : Vec3, vup : Vec3, vfov : f64, aspect_ratio : f64 ) -> Camera{
         let theta = deg2rad(vfov);
@@ -406,11 +395,35 @@ impl Camera {
         let vertical = viewport_height * v;
         let lower_left_corner = lookfrom - horizontal / 2.0 - vertical / 2.0 - w;
 
-        Camera { origin: lookfrom, lower_left_corner: lower_left_corner, horizontal: horizontal, vertical: vertical }
+        Camera { origin: lookfrom, lower_left_corner: lower_left_corner, horizontal: horizontal, vertical: vertical, u : u, v : v, w : w, depth_of_field : false, lens_radius : 0.0 }
+    }
+
+    fn newWithDepth(lookfrom : Vec3, lookat : Vec3, vup : Vec3, vfov : f64, aspect_ratio : f64, aperture : f64, focus_dist : f64) -> Camera{
+        let theta = deg2rad(vfov);
+        let h = f64::tan(theta/2.0);
+        let viewport_height = 2.0 * h;
+        let viewport_width = aspect_ratio * viewport_height;
+
+        let w = (lookfrom - lookat).unit_vector();
+        let u = (vup.cross(&w)).unit_vector();
+        let v = w.cross(&u);
+
+        let horizontal = focus_dist * viewport_width * u;
+        let vertical = focus_dist * viewport_height * v;
+        let lower_left_corner = lookfrom - horizontal / 2.0 - vertical / 2.0 - focus_dist * w;
+
+        Camera { origin: lookfrom, lower_left_corner: lower_left_corner, horizontal: horizontal, vertical: vertical, u : u, v : v, w : w, depth_of_field : true, lens_radius : aperture / 2.0 }
     }
 
     fn get_ray(&self, s: f64, t: f64) -> Ray{
-        Ray::new(self.origin, self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin)
+        if self.depth_of_field {
+            let rd = self.lens_radius * Vec3::random_in_unit_disk();
+            let offset = self.u * rd.x + self.v * rd.y;
+            Ray::new(self.origin + offset, self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin - offset)
+        }
+        else{
+            Ray::new(self.origin, self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin)
+        } 
     }
 }
 
@@ -516,12 +529,9 @@ fn main() {
     world.push(Arc::new(Sphere::new(Vec3::new(0.3, 0.0, -1.75), 0.5, mat3.clone())));
     
     // Camera
-    let camera = Camera::new( Vec3::new(0.0, 0.8, 0.5), 
-                                        Vec3::new(0.0, 0.4, -1.0), 
-                                            Vec3::new(0.0, 1.0, 0.0), 
-                                            90.0, 
-                                            ASPECT_RATIO);
-    
+    //let camera = Camera::new( Vec3::new(0.0, 0.8, 0.5), Vec3::new(0.0, 0.4, -1.0), Vec3::new(0.0, 1.0, 0.0), 90.0, ASPECT_RATIO);
+    let camera = Camera::newWithDepth( Vec3::new(0.0, 0.8, 0.5), Vec3::new(0.0, 0.4, -1.0), Vec3::new(0.0, 1.0, 0.0), 90.0, ASPECT_RATIO, 0.03, (Vec3::new(0.0, 0.8, 0.5) - Vec3::new(0.0, 0.4, -1.0)).length());
+
     // Iterate over all pixels in the image.
     image.enumerate_pixels_mut().par_bridge().for_each(|(x, y, pixel)|{
         let y = (HEIGHT - 1) - y; 
